@@ -16,7 +16,6 @@ export const App = () => {
   const [isSessionActive, setIsSessionActive] = useState(false);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [isAvatarReady, setIsAvatarReady] = useState(false);
-  const [hasInitialized, setHasInitialized] = useState(false);
   const [lastSpokenMessage, setLastSpokenMessage] = useState("");
   const [question, setQuestion] = useState("");
   const [voiceResponse, setVoiceResponse] = useState({
@@ -36,8 +35,6 @@ export const App = () => {
   };
 
   const initializeSession = async () => {
-    if (hasInitialized) return;
-
     const token = await fetchAccessToken();
     const newAvatar = new StreamingAvatar({ token });
     const session = await newAvatar.createStartAvatar({
@@ -150,6 +147,7 @@ export const App = () => {
         if (!blob) return;
         const formData = new FormData();
         formData.append("file", blob, "photo.png");
+        formData.append("name", voiceResponse.name);
         try {
           const response = await fetch("http://localhost:3001/api/amazon/save-image", {
             method: "POST",
