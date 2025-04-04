@@ -8,14 +8,24 @@ import StreamingAvatar, {
 } from "@heygen/streaming-avatar";
 import SpeechRecognitionButton from "./components/SpeechRecognitionButton";
 
+const fetchAccessToken = async (): Promise<string> => {
+  const apiKey = import.meta.env.VITE_HEYGEN_API_KEY;
+  const response = await fetch("https://api.heygen.com/v1/streaming.create_token", {
+    method: "POST",
+    headers: { "x-api-key": apiKey },
+  });
+  const { data } = await response.json();
+  return data.token;
+};
+
 export const App = () => {
   const avatarVideoRef = useRef<HTMLVideoElement>(null);
   const cameraVideoRef = useRef<HTMLVideoElement>(null);
   const [avatar, setAvatar] = useState<StreamingAvatar | null>(null);
   const [sessionData, setSessionData] = useState<any>(null);
-  const [isSessionActive, setIsSessionActive] = useState(false);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [isAvatarReady, setIsAvatarReady] = useState(false);
+
   const [lastSpokenMessage, setLastSpokenMessage] = useState("");
   const [question, setQuestion] = useState("");
   const [voiceResponse, setVoiceResponse] = useState({
@@ -23,37 +33,27 @@ export const App = () => {
     valid: false,
     name: "",
   });
-  const [countdown, setCountdown] = useState<number>(3);
-
-  const fetchAccessToken = async (): Promise<string> => {
-    const apiKey = import.meta.env.VITE_HEYGEN_API_KEY;
-    const response = await fetch("https://api.heygen.com/v1/streaming.create_token", {
-      method: "POST",
-      headers: { "x-api-key": apiKey },
-    });
-    const { data } = await response.json();
-    return data.token;
-  };
 
   const initializeSession = async () => {
     const token = await fetchAccessToken();
     const newAvatar = new StreamingAvatar({ token });
+
     const session = await newAvatar.createStartAvatar({
       quality: AvatarQuality.High,
       avatarName: "Wayne_20240711",
     });
 
-    setAvatar(newAvatar);
-    setSessionData(session);
-    setIsSessionActive(true);
-
     newAvatar.on(StreamingEvents.STREAM_READY, handleStreamReady);
     newAvatar.on(StreamingEvents.STREAM_DISCONNECTED, terminateAvatarSession);
 
-    await newAvatar.speak({
-      text: "Buen dia. Por favor, colócate al centro de la cámara. Contaré 3 segundos, y luego tomaré una foto.",
-      taskType: TaskType.REPEAT,
-    });
+    setAvatar(newAvatar);
+    setSessionData(session);
+  };
+
+  const startAvatarQuestions = async () => {
+    speakAvatar(
+      "Buen día. Por favor, colócate al centro de la cámara. Contaré 3 segundos, y luego tomaré una foto."
+    );
 
     let countdownValue = 3;
     const countdownInterval = setInterval(() => {
@@ -62,19 +62,12 @@ export const App = () => {
         if (countdownValue === 3) text = "tres";
         else if (countdownValue === 2) text = "dos";
         else if (countdownValue === 1) text = "uno";
-        newAvatar.speak({
-          text: text,
-          taskType: TaskType.REPEAT,
-        });
-        setCountdown(countdownValue);
+        speakAvatar(text);
         countdownValue--;
       } else {
         clearInterval(countdownInterval);
-        setCountdown(0);
-        newAvatar.speak({
-          text: "Tomando Foto!",
-          taskType: TaskType.REPEAT,
-        });
+        speakAvatar("Tomando Foto");
+
         captureAndSendPhoto();
       }
     }, 1000);
@@ -90,36 +83,10 @@ export const App = () => {
     }
   };
 
-  const handleStreamReady = (event: any) => {
-    setIsAvatarReady(true);
-    if (event.detail && avatarVideoRef.current) {
-      avatarVideoRef.current.srcObject = event.detail;
-    } else {
-      console.error("Stream is not available", event);
-    }
-  };
-
-  const terminateAvatarSession = async () => {
-    if (!avatar || !sessionData) return;
-    await avatar.stopAvatar();
-    if (cameraStream) {
-      cameraStream.getTracks().forEach((track) => track.stop());
-      if (cameraVideoRef.current) {
-        cameraVideoRef.current.srcObject = null;
-      }
-    }
-    handleStreamDisconnected();
-  };
-
-  const handleStreamDisconnected = () => {
-    if (avatarVideoRef.current) {
-      avatarVideoRef.current.srcObject = null;
-    }
-    setIsSessionActive(false);
-    setIsAvatarReady(false);
-    setAvatar(null);
-    setSessionData(null);
-  };
+  useEffect(() => {
+    if (!isAvatarReady) return;
+    startAvatarQuestions();
+  }, [isAvatarReady]);
 
   const captureAndSendPhoto = async () => {
     if (!cameraVideoRef.current) return;
@@ -141,17 +108,61 @@ export const App = () => {
           body: formData,
         });
         const data = await response.json();
-        console.log({ data });
-        // console: { "exits": false,"message": "No se encontraron coincidencias"}
+
+        if (data?.exits) {
+          speakAvatar("Hola, Eres conocido");
+        } else {
+          speakAvatar("Es tu primera vez, me podria decir su nombre ?");
+        }
       } catch (error) {
         console.error("Error en la solicitud:", error);
       }
     }, "image/png");
   };
 
+  const handleStreamReady = (event: any) => {
+    console.log("handleStreamReady");
+    console.log(event);
+
+    setIsAvatarReady(true);
+    if (event.detail && avatarVideoRef.current) {
+      avatarVideoRef.current.srcObject = event.detail;
+    } else {
+      console.error("Stream is not available", event);
+    }
+  };
+
+  const handleStreamDisconnected = () => {
+    if (avatarVideoRef.current) {
+      avatarVideoRef.current.srcObject = null;
+    }
+    setIsAvatarReady(false);
+    setAvatar(null);
+    setSessionData(null);
+  };
+
+  const terminateAvatarSession = async () => {
+    if (!avatar || !sessionData) return;
+    await avatar.stopAvatar();
+    if (cameraStream) {
+      cameraStream.getTracks().forEach((track) => track.stop());
+      if (cameraVideoRef.current) {
+        cameraVideoRef.current.srcObject = null;
+      }
+    }
+    handleStreamDisconnected();
+  };
+
   const speakAvatar = async (message: string) => {
+    console.log("speakAvatar");
+    console.log({ avatar });
+    console.log({ message });
+    console.log({ lastSpokenMessage });
+
     if (!avatar || message === lastSpokenMessage) return;
     setLastSpokenMessage(message);
+    console.log("spek");
+
     await avatar.speak({
       text: message,
       taskType: TaskType.REPEAT,
@@ -166,9 +177,58 @@ export const App = () => {
   }, []);
 
   useEffect(() => {
+    if (!question.trim()) return;
+    const validate = async () => {
+      try {
+        const { data } = await axios.post("http://localhost:3001/api/openai/validate-name", {
+          name: question,
+        });
+        setVoiceResponse(data.data);
+      } catch (error) {
+        console.error("Error validando el nombre:", error);
+      }
+    };
+    validate();
+  }, [question]);
+
+  useEffect(() => {
     if (!voiceResponse.message.trim()) return;
     speakAvatar(voiceResponse.message);
   }, [voiceResponse.message]);
+
+  useEffect(() => {
+    if (!voiceResponse.valid || !cameraVideoRef.current) return;
+    const captureAndSendPhoto = async () => {
+      const video = cameraVideoRef.current;
+      const canvas = document.createElement("canvas");
+      if (!video) return;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(async (blob) => {
+        if (!blob) return;
+        const formData = new FormData();
+        formData.append("file", blob, "photo.png");
+        formData.append("name", voiceResponse.name);
+        try {
+          const response = await fetch("http://localhost:3001/api/amazon/save-image", {
+            method: "POST",
+            body: formData,
+          });
+          if (response.ok) {
+            console.log("Foto enviada con éxito");
+          } else {
+            console.error("Error al enviar la foto");
+          }
+        } catch (error) {
+          console.error("Error en la solicitud:", error);
+        }
+      }, "image/png");
+    };
+    captureAndSendPhoto();
+  }, [voiceResponse.valid]);
 
   return (
     <main
