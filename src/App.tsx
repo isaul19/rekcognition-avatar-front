@@ -23,6 +23,7 @@ export const App = () => {
     valid: false,
     name: "",
   });
+  const [countdown, setCountdown] = useState<number>(3);
 
   const fetchAccessToken = async (): Promise<string> => {
     const apiKey = import.meta.env.VITE_HEYGEN_API_KEY;
@@ -50,9 +51,33 @@ export const App = () => {
     newAvatar.on(StreamingEvents.STREAM_DISCONNECTED, terminateAvatarSession);
 
     await newAvatar.speak({
-      text: "Buen día. ¿Me podría decir su nombre?",
+      text: "Buen dia. Por favor, colócate al centro de la cámara. Contaré 3 segundos, y luego tomaré una foto.",
       taskType: TaskType.REPEAT,
     });
+
+    let countdownValue = 3;
+    const countdownInterval = setInterval(() => {
+      if (countdownValue > 0) {
+        let text = "";
+        if (countdownValue === 3) text = "tres";
+        else if (countdownValue === 2) text = "dos";
+        else if (countdownValue === 1) text = "uno";
+        newAvatar.speak({
+          text: text,
+          taskType: TaskType.REPEAT,
+        });
+        setCountdown(countdownValue);
+        countdownValue--;
+      } else {
+        clearInterval(countdownInterval);
+        setCountdown(0);
+        newAvatar.speak({
+          text: "Tomando Foto!",
+          taskType: TaskType.REPEAT,
+        });
+        captureAndSendPhoto();
+      }
+    }, 1000);
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true });
@@ -74,16 +99,6 @@ export const App = () => {
     }
   };
 
-  const handleStreamDisconnected = () => {
-    if (avatarVideoRef.current) {
-      avatarVideoRef.current.srcObject = null;
-    }
-    setIsSessionActive(false);
-    setIsAvatarReady(false);
-    setAvatar(null);
-    setSessionData(null);
-  };
-
   const terminateAvatarSession = async () => {
     if (!avatar || !sessionData) return;
     await avatar.stopAvatar();
@@ -94,6 +109,44 @@ export const App = () => {
       }
     }
     handleStreamDisconnected();
+  };
+
+  const handleStreamDisconnected = () => {
+    if (avatarVideoRef.current) {
+      avatarVideoRef.current.srcObject = null;
+    }
+    setIsSessionActive(false);
+    setIsAvatarReady(false);
+    setAvatar(null);
+    setSessionData(null);
+  };
+
+  const captureAndSendPhoto = async () => {
+    if (!cameraVideoRef.current) return;
+    const video = cameraVideoRef.current;
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(async (blob) => {
+      if (!blob) return;
+      const formData = new FormData();
+      formData.append("file", blob, "photo.png");
+
+      try {
+        const response = await fetch("http://localhost:3001/api/amazon/compare-faces", {
+          method: "POST",
+          body: formData,
+        });
+        const data = await response.json();
+        console.log({ data });
+        // console: { "exits": false,"message": "No se encontraron coincidencias"}
+      } catch (error) {
+        console.error("Error en la solicitud:", error);
+      }
+    }, "image/png");
   };
 
   const speakAvatar = async (message: string) => {
@@ -113,58 +166,9 @@ export const App = () => {
   }, []);
 
   useEffect(() => {
-    if (!question.trim()) return;
-    const validate = async () => {
-      try {
-        const { data } = await axios.post("http://localhost:3001/api/openai/validate-name", {
-          name: question,
-        });
-        setVoiceResponse(data.data);
-      } catch (error) {
-        console.error("Error validando el nombre:", error);
-      }
-    };
-    validate();
-  }, [question]);
-
-  useEffect(() => {
     if (!voiceResponse.message.trim()) return;
     speakAvatar(voiceResponse.message);
   }, [voiceResponse.message]);
-
-  useEffect(() => {
-    if (!voiceResponse.valid || !cameraVideoRef.current) return;
-    const captureAndSendPhoto = async () => {
-      const video = cameraVideoRef.current;
-      const canvas = document.createElement("canvas");
-      if (!video) return;
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      canvas.toBlob(async (blob) => {
-        if (!blob) return;
-        const formData = new FormData();
-        formData.append("file", blob, "photo.png");
-        formData.append("name", voiceResponse.name);
-        try {
-          const response = await fetch("http://localhost:3001/api/amazon/save-image", {
-            method: "POST",
-            body: formData,
-          });
-          if (response.ok) {
-            console.log("Foto enviada con éxito");
-          } else {
-            console.error("Error al enviar la foto");
-          }
-        } catch (error) {
-          console.error("Error en la solicitud:", error);
-        }
-      }, "image/png");
-    };
-    captureAndSendPhoto();
-  }, [voiceResponse.valid]);
 
   return (
     <main
