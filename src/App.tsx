@@ -41,6 +41,7 @@ export const App = () => {
     const session = await newAvatar.createStartAvatar({
       quality: AvatarQuality.High,
       avatarName: "Wayne_20240711",
+      disableIdleTimeout: true,
     });
 
     newAvatar.on(StreamingEvents.STREAM_READY, handleStreamReady);
@@ -71,7 +72,9 @@ export const App = () => {
         captureAndSendPhoto();
       }
     }, 1000);
+  };
 
+  const startCamera = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true });
       if (cameraVideoRef.current) {
@@ -85,7 +88,7 @@ export const App = () => {
 
   useEffect(() => {
     if (!isAvatarReady) return;
-    startAvatarQuestions();
+    startCamera();
   }, [isAvatarReady]);
 
   const captureAndSendPhoto = async () => {
@@ -110,7 +113,7 @@ export const App = () => {
         const data = await response.json();
 
         if (data?.exits) {
-          speakAvatar("Hola, Eres conocido");
+          speakAvatar(data.message);
         } else {
           speakAvatar("Es tu primera vez, me podria decir su nombre ?");
         }
@@ -178,17 +181,24 @@ export const App = () => {
 
   useEffect(() => {
     if (!question.trim()) return;
-    const validate = async () => {
-      try {
-        const { data } = await axios.post("http://localhost:3001/api/openai/validate-name", {
-          name: question,
-        });
-        setVoiceResponse(data.data);
-      } catch (error) {
-        console.error("Error validando el nombre:", error);
-      }
-    };
-    validate();
+
+    if (question.toUpperCase() === "HOLA") {
+      startAvatarQuestions();
+    } else if (question.toUpperCase() === "ADIOS" || question.toUpperCase() === "ADIÓS") {
+      speakAvatar("Hasta Pronto");
+    } else {
+      const validate = async () => {
+        try {
+          const { data } = await axios.post("http://localhost:3001/api/openai/validate-name", {
+            name: question,
+          });
+          setVoiceResponse(data.data);
+        } catch (error) {
+          console.error("Error validando el nombre:", error);
+        }
+      };
+      validate();
+    }
   }, [question]);
 
   useEffect(() => {
