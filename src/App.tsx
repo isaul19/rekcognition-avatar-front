@@ -157,11 +157,6 @@ export const App = () => {
   };
 
   const speakAvatar = async (message: string) => {
-    console.log("speakAvatar");
-    console.log({ avatar });
-    console.log({ message });
-    console.log({ lastSpokenMessage });
-
     if (!avatar || message === lastSpokenMessage) return;
     setLastSpokenMessage(message);
     console.log("spek");
